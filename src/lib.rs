@@ -31,12 +31,12 @@ pub fn run() -> Result<(), String> {
 
         report = Report::from_bytes(buf);
 
-        lock.write(format!("Square: {}\n",   report.is_button_down(Button::Square))  .as_bytes()).expect("Writing to stdout failed");
-        lock.write(format!("Cross: {}\n",    report.is_button_down(Button::Cross))   .as_bytes()).expect("Writing to stdout failed");
-        lock.write(format!("Circle: {}\n",   report.is_button_down(Button::Circle))  .as_bytes()).expect("Writing to stdout failed");
-        lock.write(format!("Triangle: {}\n", report.is_button_down(Button::Triangle)).as_bytes()).expect("Writing to stdout failed");
-        lock.write(b"\n")                                                                        .expect("Writing to stdout failed");
-        lock.flush()                                                                             .expect("Writing to stdout failed");
+        lock.write(format!("Square: {}\n",   report.is_button_pressed(Button::Square))  .as_bytes()).expect("Writing to stdout failed");
+        lock.write(format!("Cross: {}\n",    report.is_button_pressed(Button::Cross))   .as_bytes()).expect("Writing to stdout failed");
+        lock.write(format!("Circle: {}\n",   report.is_button_pressed(Button::Circle))  .as_bytes()).expect("Writing to stdout failed");
+        lock.write(format!("Triangle: {}\n", report.is_button_pressed(Button::Triangle)).as_bytes()).expect("Writing to stdout failed");
+        lock.write(b"\n")                                                                           .expect("Writing to stdout failed");
+        lock.flush()                                                                                .expect("Writing to stdout failed");
     }
 }
 
@@ -51,7 +51,7 @@ impl Report {
         }
     }
 
-    pub fn is_button_down(&self, button: Button) -> bool {
+    pub fn is_button_pressed(&self, button: Button) -> bool {
         debug_assert_eq!(REPORT_LEN, self.data.len());
 
         let nybble = self.data[5] >> 4;
@@ -60,6 +60,23 @@ impl Report {
             Button::Cross    => nybble & 2 != 0,
             Button::Circle   => nybble & 4 != 0,
             Button::Triangle => nybble & 8 != 0,
+        }
+    }
+
+    pub fn is_dpad_pressed(&self, dpad: DPad) -> bool {
+        debug_assert_eq!(REPORT_LEN, self.data.len());
+
+        let nybble = self.data[5] & 0x0f;
+        match dpad {
+            // NOTE: 0x8 represents "no dpad pressed".
+            DPad::Up        => nybble == 0b0000,
+            DPad::UpRight   => nybble == 0b0001,
+            DPad::UpLeft    => nybble == 0b0111,
+            DPad::Right     => nybble == 0b0010,
+            DPad::Down      => nybble == 0b0100,
+            DPad::DownRight => nybble == 0b0011,
+            DPad::DownLeft  => nybble == 0b0101,
+            DPad::Left      => nybble == 0b0110,
         }
     }
 }
@@ -71,47 +88,60 @@ enum Button {
     Triangle,
 }
 
+enum DPad {
+    Up,
+    UpRight,
+    UpLeft,
+    Right,
+    Down,
+    DownRight,
+    DownLeft,
+    Left,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn btn_down_square() {
-        let mut report = Report { data: vec![0u8; REPORT_LEN] };
-        report.data[5] = 0b00010000;
+    macro_rules! assert_button_pressed {
+        ($button:tt, $data:expr) => {
+            let mut report = Report { data: vec![0u8; REPORT_LEN] };
+            report.data[5] = $data;
 
-        let res = report.is_button_down(Button::Square);
-        let expected = true;
-        assert_eq!(expected, res);
+            let res = report.is_button_pressed(Button::$button);
+            let expected = true;
+            assert_eq!(expected, res);
+        };
+    }
+
+    macro_rules! assert_dpad_pressed {
+        ($dpad:tt, $data:expr) => {
+            let mut report = Report { data: vec![0u8; REPORT_LEN] };
+            report.data[5] = $data;
+
+            let res = report.is_dpad_pressed(DPad::$dpad);
+            let expected = true;
+            assert_eq!(expected, res);
+        };
     }
 
     #[test]
-    fn btn_down_cross() {
-        let mut report = Report { data: vec![0u8; REPORT_LEN] };
-        report.data[5] = 0b00100000;
-
-        let res = report.is_button_down(Button::Cross);
-        let expected = true;
-        assert_eq!(expected, res);
+    fn button_pressed() {
+        assert_button_pressed!(Square, 0b00010000);
+        assert_button_pressed!(Cross, 0b00100000);
+        assert_button_pressed!(Circle, 0b01000000);
+        assert_button_pressed!(Triangle, 0b10000000);
     }
 
     #[test]
-    fn btn_down_circle() {
-        let mut report = Report { data: vec![0u8; REPORT_LEN] };
-        report.data[5] = 0b01000000;
-
-        let res = report.is_button_down(Button::Circle);
-        let expected = true;
-        assert_eq!(expected, res);
-    }
-
-    #[test]
-    fn btn_down_triangle() {
-        let mut report = Report { data: vec![0u8; REPORT_LEN] };
-        report.data[5] = 0b10000000;
-
-        let res = report.is_button_down(Button::Triangle);
-        let expected = true;
-        assert_eq!(expected, res);
+    fn dpad_pressed() {
+        assert_dpad_pressed!(Up, 0b00000000);
+        assert_dpad_pressed!(UpRight, 0b00000001);
+        assert_dpad_pressed!(UpLeft, 0b00000111);
+        assert_dpad_pressed!(Right, 0b00000010);
+        assert_dpad_pressed!(Down, 0b00000100);
+        assert_dpad_pressed!(DownRight, 0b00000011);
+        assert_dpad_pressed!(DownLeft, 0b00000101);
+        assert_dpad_pressed!(Left, 0b00000110);
     }
 }
