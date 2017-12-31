@@ -4,4 +4,4 @@ name = "ds4"
 version = "0.0.1"
 
 [dependencies.hidapi]
-version = "0.4.1"
+path = "../../ll/hidapi-rs"

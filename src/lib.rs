@@ -3,7 +3,8 @@ use hidapi::HidApi;
 
 use std::io::Write;
 
-const REPORT_LEN: usize = 64;
+const USB_REPORT_IN_LEN: usize = 64;
+const USB_REPORT_OUT_LEN: usize = USB_REPORT_IN_LEN + 1;
 
 pub fn run() -> Result<(), String> {
     let mgr = HidApi::new().unwrap();
@@ -18,25 +19,29 @@ pub fn run() -> Result<(), String> {
     let dev = mgr.open(vid, pid).map_err(|_msg|
         String::from("Failed to open the DS4 device. Have you setup `udev` rules? (if not, temporarily run `sudo ./target/debug/main`)"))?;
 
-    let mut buf = [0u8; REPORT_LEN];
-
-    let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
-
+    let mut buf_in = [0u8; USB_REPORT_IN_LEN];
     let mut report: Report;
 
     loop {
-        let res = dev.read(&mut buf[..]);
-        debug_assert_eq!(Ok(REPORT_LEN), res);
+        let res = dev.read(&mut buf_in[..]);
+        debug_assert_eq!(Ok(USB_REPORT_IN_LEN), res);
 
-        report = Report::from_bytes(buf);
+        report = Report::from_bytes(buf_in);
 
-        lock.write(format!("Square: {}\n",   report.is_button_pressed(Button::Square))  .as_bytes()).expect("Writing to stdout failed");
-        lock.write(format!("Cross: {}\n",    report.is_button_pressed(Button::Cross))   .as_bytes()).expect("Writing to stdout failed");
-        lock.write(format!("Circle: {}\n",   report.is_button_pressed(Button::Circle))  .as_bytes()).expect("Writing to stdout failed");
-        lock.write(format!("Triangle: {}\n", report.is_button_pressed(Button::Triangle)).as_bytes()).expect("Writing to stdout failed");
-        lock.write(b"\n")                                                                           .expect("Writing to stdout failed");
-        lock.flush()                                                                                .expect("Writing to stdout failed");
+        if report.is_dpad_pressed(DPad::Up) {
+            let mut buf_out = [0u8; USB_REPORT_OUT_LEN];
+            // Report ID. Everything else needs to be offset by 1 to make up for this byte.
+            buf_out[0] = 0x01;
+
+            buf_out[9 + 1] = 0xff;
+            if let Err(msg) = dev.send_feature_report(&buf_out) {
+                if let Err(err) = dev.check_error() {
+                    eprintln!("hid_error: {}", err);
+                }
+
+                return Err(msg.into());
+            }
+        }
     }
 }
 
@@ -52,7 +57,7 @@ impl Report {
     }
 
     pub fn is_button_pressed(&self, button: Button) -> bool {
-        debug_assert_eq!(REPORT_LEN, self.data.len());
+        debug_assert_eq!(USB_REPORT_IN_LEN, self.data.len());
 
         let nybble = self.data[5] >> 4;
         match button {
@@ -64,7 +69,7 @@ impl Report {
     }
 
     pub fn is_dpad_pressed(&self, dpad: DPad) -> bool {
-        debug_assert_eq!(REPORT_LEN, self.data.len());
+        debug_assert_eq!(USB_REPORT_IN_LEN, self.data.len());
 
         let nybble = self.data[5] & 0x0f;
         match dpad {
@@ -105,7 +110,7 @@ mod tests {
 
     macro_rules! assert_button_pressed {
         ($button:tt, $data:expr) => {
-            let mut report = Report { data: vec![0u8; REPORT_LEN] };
+            let mut report = Report { data: vec![0u8; USB_REPORT_IN_LEN] };
             report.data[5] = $data;
 
             let res = report.is_button_pressed(Button::$button);
@@ -116,7 +121,7 @@ mod tests {
 
     macro_rules! assert_dpad_pressed {
         ($dpad:tt, $data:expr) => {
-            let mut report = Report { data: vec![0u8; REPORT_LEN] };
+            let mut report = Report { data: vec![0u8; USB_REPORT_IN_LEN] };
             report.data[5] = $data;
 
             let res = report.is_dpad_pressed(DPad::$dpad);
